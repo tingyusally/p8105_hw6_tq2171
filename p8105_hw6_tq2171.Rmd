@@ -18,6 +18,7 @@ library(broom)
 library(ggplot2)
 library(purrr)
 library(tidyr)
+library(modelr)
 ```
 
 ```{r}
@@ -109,3 +110,97 @@ ggplot(city_results, aes(x = reorder(city_state, estimate), y = estimate)) +
 
 The plot illustrates the adjusted odds ratios (ORs) for solving homicides comparing male victims to female victims across different cities. Most cities cluster around an OR of 1, indicating little difference in the likelihood of solving homicides based on the victim's sex. However, some cities show ORs significantly greater than 1, suggesting that male victims' cases are more likely to be solved than those of female victims, while others have ORs less than 1, implying the opposite. Cities with wide confidence intervals reflect high uncertainty. In contrast, cities with narrow intervals likely have more reliable estimates. A few cities stand out as outliers with notably high or low ORs, which could indicate unique factors affecting case resolution. Additionally, confidence intervals crossing 1 suggest no statistically significant difference in some cities, even if their ORs deviate from 1. Overall, the plot highlights disparities in how victim sex may influence case outcomes, underscoring the need for further investigation into the underlying causes in cities with extreme or unusual trends.
 
+## Problem 3
+```{r}
+# Load the data
+birthweight_data <- read.csv("./birthweight.csv")
+
+# Convert categorical variables to factors
+birthweight_data <- birthweight_data %>%
+  mutate(
+    babysex = factor(babysex, levels = c(1, 2), labels = c("Male", "Female")),
+    frace = factor(frace, levels = c(1, 2, 3, 4, 8, 9),
+                   labels = c("White", "Black", "Asian", "Puerto Rican", "Other", "Unknown")),
+    malform = factor(malform, levels = c(0, 1), labels = c("Absent", "Present")),
+    mrace = factor(mrace, levels = c(1, 2, 3, 4, 8),
+                   labels = c("White", "Black", "Asian", "Puerto Rican", "Other"))
+  )
+
+# Check for potential outliers in numeric variables
+summary(birthweight_data)
+```
+
+```{r}
+# model
+model_formula <- bwt ~ gaweeks + ppbmi + wtgain + smoken + mrace + babysex + malform
+
+# Model 1: Length at birth and gestational age
+model_1_formula <- bwt ~ blength + gaweeks
+
+# Model 2: Head circumference, length, sex, and interactions
+model_2_formula <- bwt ~ bhead * blength * babysex
+```
+
+```{r}
+# Monte Carlo Cross-Validation
+set.seed(123)  # For reproducibility
+cv_splits <- crossv_mc(birthweight_data, 100) %>%
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  )
+
+# Fit models and calculate RMSE
+cv_splits <- cv_splits %>%
+  mutate(
+    # Fit models on training data
+    proposed_mod = map(train, ~ lm(model_formula, data = .x)),
+    model_1_mod = map(train, ~ lm(model_1_formula, data = .x)),
+    model_2_mod = map(train, ~ lm(model_2_formula, data = .x)),
+    
+    # Calculate RMSE on test data
+    rmse_proposed = map2_dbl(proposed_mod, test, ~ rmse(model = .x, data = .y)),
+    rmse_model_1 = map2_dbl(model_1_mod, test, ~ rmse(model = .x, data = .y)),
+    rmse_model_2 = map2_dbl(model_2_mod, test, ~ rmse(model = .x, data = .y))
+  )
+
+# Summarize RMSE results
+rmse_summary <- cv_splits %>%
+  select(rmse_proposed, rmse_model_1, rmse_model_2) %>%
+  pivot_longer(everything(), names_to = "model", values_to = "rmse") %>%
+  mutate(model = recode(model,
+                        rmse_proposed = "Proposed Model",
+                        rmse_model_1 = "Model 1",
+                        rmse_model_2 = "Model 2"))
+
+# Plot RMSE distribution
+ggplot(rmse_summary, aes(x = model, y = rmse, fill = model)) +
+  geom_violin() +
+  labs(
+    title = "RMSE Distribution Across Models",
+    x = "Model",
+    y = "RMSE"
+  ) +
+  theme_minimal()
+
+# Residual Plot for Proposed Model
+birthweight_data <- birthweight_data %>%
+  add_predictions(lm(model_formula, data = birthweight_data), var = "fitted") %>%
+  add_residuals(lm(model_formula, data = birthweight_data), var = "residuals")
+
+ggplot(birthweight_data, aes(x = fitted, y = residuals)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Residuals vs Fitted Values for Proposed Model",
+    x = "Fitted Values (Predicted Birthweight)",
+    y = "Residuals"
+  ) +
+  theme_minimal()
+```
+
+The modeling process began with proposing a regression model for predicting birthweight based on biologically relevant factors, including gestational age, maternal characteristics (e.g., pre-pregnancy BMI, weight gain, smoking habits, and race), and baby-specific factors (e.g., sex and presence of malformations). This proposed model was developed based on both domain knowledge and hypothesized relationships affecting birthweight. To compare its performance, two alternative models were introduced: one using length at birth and gestational age as predictors (main effects only) and another incorporating head circumference, length, sex, and all two-way and three-way interactions between these variables. Monte Carlo cross-validation was used to evaluate model performance, with 100 random train-test splits generated to ensure robust results. Each model was fitted on the training data, and RMSE (root mean square error) was computed on the test data to assess prediction accuracy. Finally, the residuals of the proposed model were plotted against fitted values to check for assumptions of linearity, homoscedasticity, and absence of patterns, ensuring the validity of the model. This comprehensive process allowed for a thorough evaluation and comparison of predictive performance across all models.
+
+The results of the model comparison indicate distinct differences in predictive performance. The RMSE distribution across models reveals that Model 2, which incorporates head circumference, length at birth, sex, and all interactions, achieves the lowest RMSE, suggesting it provides the most accurate and consistent predictions. Model 1, which includes only length at birth and gestational age as predictors, performs moderately well with a narrower RMSE distribution but does not achieve the same level of accuracy as Model 2. The proposed model, which incorporates gestational age, maternal characteristics (e.g., pre-pregnancy BMI, weight gain, smoking status), and baby-specific factors (e.g., sex and malformations), has the highest RMSE and underperforms compared to the other models, likely due to its inability to capture more complex interactions and relationships.
+
+The residual plot for the proposed model shows generally random scatter around zero, indicating that the model assumptions of linearity and homoscedasticity are reasonably met. However, the presence of some larger residuals points to potential outliers that may influence the model’s performance. While the proposed model aligns well with biological reasoning and offers interpretability, its relatively higher RMSE indicates it is less effective at predicting birthweight compared to Model 2. Overall, Model 2 is the preferred choice for predictive accuracy, whereas the proposed model may still be useful for interpretative analysis due to its simplicity and grounding in hypothesized factors.
