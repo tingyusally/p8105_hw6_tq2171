@@ -1,0 +1,111 @@
+---
+title: "p8105_hw6_tq2171"
+author: "Tingyu Qian"
+date: "2024-11-27"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem 2
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(broom)
+library(ggplot2)
+library(purrr)
+library(tidyr)
+```
+
+```{r}
+# Load the data
+homicide_data <- read.csv("./homicide-data.csv")
+```
+
+```{r}
+# Create `city_state` variable
+homicide_data <- homicide_data %>%
+  mutate(city_state = paste(city, state, sep = ", "))
+
+# Omit specific cities and ensure victim_age is numeric
+cleaned_data <- homicide_data %>%
+  filter(!city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL")) %>%
+  filter(victim_age != "Unknown") %>%  # Remove rows with "Unknown" in `victim_age`
+  mutate(victim_age = as.numeric(victim_age)) %>%
+  mutate(
+    resolved = ifelse(disposition == "Open/No arrest", 0, 1)  # Binary variable for solved/unsolved
+  )
+
+# Filter data to include only White or Black victims
+filtered_data <- cleaned_data %>%
+  filter(victim_race %in% c("White", "Black"))
+```
+
+```{r}
+# Filter data for Baltimore, MD
+baltimore_data <- filtered_data %>%
+  filter(city_state == "Baltimore, MD")
+```
+
+```{r}
+# Ensure variables are properly formatted
+baltimore_data <- baltimore_data %>%
+  mutate(
+    victim_sex = factor(victim_sex, levels = c("Female", "Male")),  # Reference group: Female
+    victim_race = factor(victim_race)  # Convert race to a factor
+  )
+```
+
+```{r}
+# Fit logistic regression model
+glm_model <- glm(resolved ~ victim_age + victim_sex + victim_race, 
+                 data = baltimore_data, 
+                 family = binomial)
+
+# Summarize the model with broom::tidy
+model_summary <- tidy(glm_model, exponentiate = TRUE, conf.int = TRUE)
+
+# Extract odds ratio and confidence intervals for male vs female victims
+male_vs_female_or <- model_summary %>% filter(term == "victim_sexMale")
+
+# Print the results
+print(male_vs_female_or)
+```
+
+```{r}
+# Group data by city_state and fit logistic regression for each city
+city_results <- filtered_data %>%
+  group_by(city_state) %>%
+  nest() %>%
+  mutate(
+    glm_model = map(data, ~ glm(resolved ~ victim_age + victim_sex + victim_race, data = ., family = binomial)),
+    tidy_model = map(glm_model, ~ tidy(.x, exponentiate = TRUE, conf.int = TRUE))
+  ) %>%
+  unnest(tidy_model) %>%
+  filter(term == "victim_sexMale") %>%
+  select(city_state, estimate, conf.low, conf.high)
+
+# Print the results
+print(city_results)
+```
+
+```{r}
+# Create a plot of odds ratios with confidence intervals
+ggplot(city_results, aes(x = reorder(city_state, estimate), y = estimate)) +
+  geom_point(color = "blue", size = 3) +  # Points for OR estimates
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, color = "darkgray") +  # CIs
+  coord_flip() +  # Flip coordinates for better readability
+  labs(
+    title = "Adjusted Odds Ratios for Male vs Female Victims by City",
+    x = "City",
+    y = "Odds Ratio (Male vs Female)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 8))  # Adjust text size for better readability
+```
+
+The plot illustrates the adjusted odds ratios (ORs) for solving homicides comparing male victims to female victims across different cities. Most cities cluster around an OR of 1, indicating little difference in the likelihood of solving homicides based on the victim's sex. However, some cities show ORs significantly greater than 1, suggesting that male victims' cases are more likely to be solved than those of female victims, while others have ORs less than 1, implying the opposite. Cities with wide confidence intervals reflect high uncertainty. In contrast, cities with narrow intervals likely have more reliable estimates. A few cities stand out as outliers with notably high or low ORs, which could indicate unique factors affecting case resolution. Additionally, confidence intervals crossing 1 suggest no statistically significant difference in some cities, even if their ORs deviate from 1. Overall, the plot highlights disparities in how victim sex may influence case outcomes, underscoring the need for further investigation into the underlying causes in cities with extreme or unusual trends.
+
