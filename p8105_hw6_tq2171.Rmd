@@ -22,7 +22,6 @@ library(modelr)
 ## Problem 1
 
 ```{r}
-
 weather_df = 
   rnoaa::meteo_pull_monitors(
     c("USW00094728"),
