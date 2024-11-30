@@ -9,8 +9,6 @@ output: github_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Problem 2
-
 ```{r}
 # Load required libraries
 library(dplyr)
@@ -20,6 +18,78 @@ library(purrr)
 library(tidyr)
 library(modelr)
 ```
+
+## Problem 1
+
+```{r}
+
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+
+# Fit initial model
+initial_model <- lm(tmax ~ tmin, data = weather_df)
+
+# Bootstrap resampling
+set.seed(456) 
+bootstrap_results <- replicate(5000, {
+  # Resample data with replacement
+  bootstrap_sample <- weather_df %>% sample_frac(replace = TRUE)
+  
+  # Fit model to bootstrap sample
+  model <- lm(tmax ~ tmin, data = bootstrap_sample)
+  
+  # Extract R-squared
+  r_squared <- glance(model)$r.squared
+  
+  # Extract coefficients and compute log(beta0 * beta1)
+  beta <- coef(model)
+  log_beta_product <- log(beta[1] * beta[2])
+  
+  # Return the two quantities
+  c(r_squared = r_squared, log_beta_product = log_beta_product)
+}, simplify = "matrix")
+
+# Convert results to a data frame
+bootstrap_results <- as.data.frame(t(bootstrap_results))
+colnames(bootstrap_results) <- c("r_squared", "log_beta_product")
+
+# Calculate 95% confidence intervals
+ci_r_squared <- quantile(bootstrap_results$r_squared, c(0.025, 0.975))
+ci_log_beta_product <- quantile(bootstrap_results$log_beta_product, c(0.025, 0.975))
+
+# Print confidence intervals
+print("95% Confidence Interval for R-squared:")
+print(ci_r_squared)
+
+print("95% Confidence Interval for log(beta0 * beta1):")
+print(ci_log_beta_product)
+
+# Plot distributions of bootstrap estimates
+ggplot(bootstrap_results, aes(x = r_squared)) +
+  geom_histogram(bins = 30, fill = "blue", alpha = 0.6) +
+  labs(title = "Bootstrap Distribution of R-squared",
+       x = "R-squared",
+       y = "Frequency") +
+  theme_minimal()
+
+ggplot(bootstrap_results, aes(x = log_beta_product)) +
+  geom_histogram(bins = 30, fill = "green", alpha = 0.6) +
+  labs(title = "Bootstrap Distribution of log(beta0 * beta1)",
+       x = "log(beta0 * beta1)",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+## Problem 2
 
 ```{r}
 # Load the data
@@ -37,7 +107,7 @@ cleaned_data <- homicide_data %>%
   filter(victim_age != "Unknown") %>%  # Remove rows with "Unknown" in `victim_age`
   mutate(victim_age = as.numeric(victim_age)) %>%
   mutate(
-    resolved = ifelse(disposition == "Open/No arrest", 0, 1)  # Binary variable for solved/unsolved
+    resolved = ifelse(disposition == "Closed by arrest", 1, 0)  # Binary variable for solved/unsolved
   )
 
 # Filter data to include only White or Black victims
@@ -143,7 +213,7 @@ model_2_formula <- bwt ~ bhead * blength * babysex
 
 ```{r}
 # Monte Carlo Cross-Validation
-set.seed(123)  # For reproducibility
+set.seed(123) 
 cv_splits <- crossv_mc(birthweight_data, 100) %>%
   mutate(
     train = map(train, as_tibble),
