@@ -17,6 +17,7 @@ library(ggplot2)
 library(purrr)
 library(tidyr)
 library(modelr)
+library(knitr)
 ```
 
 ## Problem 1
@@ -142,7 +143,7 @@ model_summary <- tidy(glm_model, exponentiate = TRUE, conf.int = TRUE)
 male_vs_female_or <- model_summary %>% filter(term == "victim_sexMale")
 
 # Print the results
-print(male_vs_female_or)
+kable(male_vs_female_or)
 ```
 
 ```{r}
@@ -159,7 +160,7 @@ city_results <- filtered_data %>%
   select(city_state, estimate, conf.low, conf.high)
 
 # Print the results
-print(city_results)
+kable(city_results)
 ```
 
 ```{r}
